@@ -1,6 +1,6 @@
 import XCTest
 
-@testable import SnapmakerMonitor
+@testable import SnapMon
 
 final class PrinterStateReducerTests: XCTestCase {
   func testUsesGCodeByteRangeForProgressAndETA() {
@@ -125,5 +125,27 @@ final class PrinterStateReducerTests: XCTestCase {
     )
 
     XCTAssertEqual(reducer.snapshot.remaining, 0)
+  }
+
+  func testCompletionDateIsAnchoredToSnapshotUpdate() {
+    var snapshot = PrinterSnapshot()
+    snapshot.updatedAt = Date(timeIntervalSince1970: 1_000)
+    snapshot.remaining = 120
+
+    XCTAssertEqual(
+      snapshot.completionDate,
+      Date(timeIntervalSince1970: 1_120)
+    )
+  }
+
+  func testMetadataFetchCanRetryAfterFailure() {
+    var tracker = MetadataFetchTracker()
+
+    XCTAssertTrue(tracker.beginIfNeeded(for: "part.gcode"))
+    XCTAssertFalse(tracker.beginIfNeeded(for: "part.gcode"))
+
+    tracker.didFail(for: "part.gcode")
+
+    XCTAssertTrue(tracker.beginIfNeeded(for: "part.gcode"))
   }
 }

@@ -1,6 +1,6 @@
 import XCTest
 
-@testable import SnapmakerMonitor
+@testable import SnapMon
 
 final class CameraClientTests: XCTestCase {
   func testRecoverySendsFreshStartWithoutStoppingFirst() async throws {

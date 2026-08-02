@@ -95,7 +95,7 @@ struct SettingsView: View {
                     .foregroundStyle(.secondary)
                 }
                 Spacer()
-                if device.serialNumber == model.selectedPrinter?.serialNumber {
+                if device.id == model.selectedPrinter?.serialNumber {
                   Image(systemName: "checkmark")
                 }
               }
@@ -161,7 +161,7 @@ struct SettingsView: View {
             }
           }
         } else if model.notificationPermission == .denied {
-          Text("Enable notifications for Snapmaker Monitor in System Settings.")
+          Text("Enable notifications for SnapMon in System Settings.")
             .foregroundStyle(.secondary)
 
           Button("Open Notification Settings") {
@@ -187,7 +187,7 @@ struct SettingsView: View {
           )
         )
 
-        Text("Reveals and blurs the desktop or other windows behind Snapmaker Monitor.")
+        Text("Reveals and blurs the desktop or other windows behind SnapMon.")
           .font(AppTypography.caption)
           .foregroundStyle(.secondary)
       }

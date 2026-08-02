@@ -1,6 +1,6 @@
 import XCTest
 
-@testable import SnapmakerMonitor
+@testable import SnapMon
 
 final class WindowPersistenceTests: XCTestCase {
   func testRoundTripsPlacementThroughAppOwnedDefaults() {

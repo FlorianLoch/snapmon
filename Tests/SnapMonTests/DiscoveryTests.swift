@@ -1,6 +1,6 @@
 import XCTest
 
-@testable import SnapmakerMonitor
+@testable import SnapMon
 
 final class DiscoveryTests: XCTestCase {
   func testAcceptsOnlyU1InLANMode() {
@@ -46,5 +46,25 @@ final class DiscoveryTests: XCTestCase {
     )
 
     XCTAssertNil(device)
+  }
+
+  func testFallbackServiceNameMatchesPersistedPrinter() {
+    let device = DiscoveredDevice.fromBonjour(
+      serviceName: "Workshop-U1",
+      txt: [
+        "machine_type": "Snapmaker U1",
+        "link_mode": "lan",
+        "ip": "192.168.1.42",
+      ]
+    )
+
+    guard let device else {
+      XCTFail("Expected the fallback device to be accepted")
+      return
+    }
+
+    XCTAssertEqual(device.id, "Workshop-U1")
+    XCTAssertEqual(device.savedPrinter.serialNumber, "Workshop-U1")
+    XCTAssertTrue(device.matches(device.savedPrinter))
   }
 }

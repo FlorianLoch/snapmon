@@ -1,7 +1,7 @@
 import Foundation
 import XCTest
 
-@testable import SnapmakerMonitor
+@testable import SnapMon
 
 final class MoonrakerClientTests: XCTestCase {
   override func setUp() {

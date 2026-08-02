@@ -3,7 +3,7 @@ import SwiftUI
 import UserNotifications
 
 @main
-struct SnapmakerMonitorApp: App {
+struct SnapMonApp: App {
   @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
   @State private var model = AppModel()
 
@@ -18,7 +18,7 @@ struct SnapmakerMonitorApp: App {
   }
 
   private var mainWindowScene: some Scene {
-    WindowGroup("Snapmaker Monitor") {
+    WindowGroup("SnapMon") {
       ContentView()
         .environment(model)
         .font(AppTypography.body)
@@ -37,8 +37,8 @@ struct SnapmakerMonitorApp: App {
 }
 
 private enum MainWindowIdentity {
-  static let title = "Snapmaker Monitor"
-  static let identifier = NSUserInterfaceItemIdentifier("SnapmakerMonitor.MainWindow")
+  static let title = "SnapMon"
+  static let identifier = NSUserInterfaceItemIdentifier("SnapMon.MainWindow")
 }
 
 private struct MainWindowConfigurationView: NSViewRepresentable {

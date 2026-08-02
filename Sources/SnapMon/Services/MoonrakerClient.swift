@@ -87,7 +87,7 @@ final class MoonrakerClient: @unchecked Sendable {
                 "jsonrpc": "2.0",
                 "method": "server.connection.identify",
                 "params": [
-                  "client_name": "Snapmaker Monitor",
+                  "client_name": "SnapMon",
                   "version": "1.0",
                   "type": "other",
                   "url": "https://github.com/Snapmaker",
@@ -598,7 +598,14 @@ private final class CameraWebSocketCommandOperation: @unchecked Sendable {
   }
 }
 
-actor CameraClient {
+protocol CameraSessionClient: AnyObject, Sendable {
+  func startMonitoring() async throws
+  func frame() async throws -> CameraFrame
+  func recoverMonitoring() async throws
+  func stopMonitoring() async
+}
+
+actor CameraClient: CameraSessionClient {
   private let printer: SavedPrinter
   private let commandSender: any CameraMonitorCommandSending
   private var frameSession: URLSession

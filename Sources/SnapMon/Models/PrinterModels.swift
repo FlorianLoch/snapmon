@@ -103,6 +103,10 @@ struct DiscoveredDevice: Identifiable, Hashable, Codable, Sendable {
       firmwareVersion: firmwareVersion
     )
   }
+
+  func matches(_ printer: SavedPrinter) -> Bool {
+    id == printer.serialNumber
+  }
 }
 
 struct SavedPrinter: Codable, Equatable, Sendable {
@@ -143,7 +147,11 @@ struct PrinterSnapshot: Equatable, Sendable {
   var updatedAt: Date?
 
   var completionDate: Date? {
-    remaining.map { Date().addingTimeInterval($0) }
+    guard let remaining, let updatedAt else {
+      return nil
+    }
+
+    return updatedAt.addingTimeInterval(remaining)
   }
 }
 
@@ -174,11 +182,19 @@ struct CompletionTracker: Sendable {
           filename: snapshot.filename,
           observedStart: now
         )
-      } else if activeJob?.filename.isEmpty == true, !snapshot.filename.isEmpty {
+      } else if activeJob?.printerSerial != printer.serialNumber
+        || (!snapshot.filename.isEmpty
+          && activeJob?.filename != snapshot.filename)
+      {
+        let preservesObservedStart =
+          activeJob?.printerSerial == printer.serialNumber
+          && activeJob?.filename.isEmpty == true
         activeJob = JobIdentity(
           printerSerial: printer.serialNumber,
           filename: snapshot.filename,
-          observedStart: activeJob?.observedStart ?? now
+          observedStart: preservesObservedStart
+            ? activeJob?.observedStart ?? now
+            : now
         )
       }
 
@@ -199,6 +215,29 @@ struct CompletionTracker: Sendable {
     activeJob = nil
     lastNotifiedJob = job
     return CompletionEvent(job: job, printerName: printer.name)
+  }
+}
+
+struct MetadataFetchTracker: Sendable {
+  private(set) var filename: String?
+
+  mutating func beginIfNeeded(for filename: String) -> Bool {
+    guard !filename.isEmpty, self.filename != filename else {
+      return false
+    }
+
+    self.filename = filename
+    return true
+  }
+
+  mutating func didFail(for filename: String) {
+    if self.filename == filename {
+      self.filename = nil
+    }
+  }
+
+  mutating func reset() {
+    filename = nil
   }
 }
 

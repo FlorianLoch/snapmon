@@ -14,6 +14,7 @@ final class AppModel {
   private let defaults: UserDefaults
   private let discoveryService: BonjourDiscoveryService
   private let notificationService: NotificationService
+  private let cameraClientFactory: @MainActor (SavedPrinter) -> any CameraSessionClient
 
   private var hasStarted = false
   private var discoveryTask: Task<Void, Never>?
@@ -24,12 +25,15 @@ final class AppModel {
   private var cameraStartTask: Task<Void, Never>?
   private var cameraPollingTask: Task<Void, Never>?
   private var cameraKeepaliveTask: Task<Void, Never>?
-  private var cameraClient: CameraClient?
+  private var cameraTransitionTask: Task<Void, Never>?
+  private var cameraClient: (any CameraSessionClient)?
   private var terminationObserver: NSObjectProtocol?
   private var reducer = PrinterStateReducer()
   private var completionTracker = CompletionTracker()
-  private var loadedMetadataFilename: String?
+  private var metadataFetchTracker = MetadataFetchTracker()
   private var cameraIsVisible = false
+  private var commandGeneration = 0
+  private var cameraTransitionGeneration = 0
 
   var selectedPrinter: SavedPrinter?
   var discoveredDevices: [DiscoveredDevice] = []
@@ -48,11 +52,15 @@ final class AppModel {
   init(
     defaults: UserDefaults = .standard,
     discoveryService: BonjourDiscoveryService = BonjourDiscoveryService(),
-    notificationService: NotificationService = NotificationService()
+    notificationService: NotificationService = NotificationService(),
+    cameraClientFactory: @escaping @MainActor (SavedPrinter) -> any CameraSessionClient = {
+      CameraClient(printer: $0)
+    }
   ) {
     self.defaults = defaults
     self.discoveryService = discoveryService
     self.notificationService = notificationService
+    self.cameraClientFactory = cameraClientFactory
 
     if let storedRate = defaults.object(
       forKey: DefaultsKey.maximumFrameRate
@@ -103,12 +111,13 @@ final class AppModel {
   }
 
   func select(_ printer: SavedPrinter) {
+    cancelCommand()
     selectedPrinter = printer
     persistSelectedPrinter()
     reducer.reset()
     snapshot = reducer.snapshot
     completionTracker = CompletionTracker()
-    loadedMetadataFilename = nil
+    metadataFetchTracker.reset()
     connect(to: printer)
 
     Task {
@@ -142,7 +151,7 @@ final class AppModel {
     monitorTask?.cancel()
     statusPollingTask?.cancel()
     metadataTask?.cancel()
-    commandTask?.cancel()
+    cancelCommand()
     monitorTask = nil
     connectionState = .disconnected
     reducer.reset()
@@ -182,7 +191,7 @@ final class AppModel {
     cameraIsVisible = visible
 
     if visible {
-      startCameraSessionIfPossible()
+      transitionCameraSession(startAfterStop: true)
     } else {
       stopCameraSession()
     }
@@ -198,7 +207,7 @@ final class AppModel {
     }
 
     let shouldResume = snapshot.state == .paused
-    performCommand {
+    performCommand(for: printer) {
       let client = MoonrakerClient(printer: printer)
 
       if shouldResume {
@@ -217,9 +226,10 @@ final class AppModel {
       return
     }
 
-    performCommand {
+    performCommand(for: printer) {
       let confirmedState = try await MoonrakerClient(printer: printer).setLED(on: on)
-      await self.applyConfirmedLEDState(confirmedState)
+      try Task.checkCancellation()
+      await self.applyConfirmedLEDState(confirmedState, for: printer)
     }
   }
 
@@ -245,7 +255,7 @@ final class AppModel {
     monitorTask?.cancel()
     statusPollingTask?.cancel()
     metadataTask?.cancel()
-    commandTask?.cancel()
+    cancelCommand()
     stopCameraSession()
 
     if let terminationObserver {
@@ -275,7 +285,7 @@ final class AppModel {
   private func updateSavedAddress(from devices: [DiscoveredDevice]) {
     guard let selectedPrinter,
       let rediscovered = devices.first(
-        where: { $0.serialNumber == selectedPrinter.serialNumber }
+        where: { $0.matches(selectedPrinter) }
       ),
       rediscovered.host != selectedPrinter.host
     else {
@@ -289,16 +299,16 @@ final class AppModel {
   }
 
   private func connect(to printer: SavedPrinter) {
+    cancelCommand()
     monitorTask?.cancel()
     statusPollingTask?.cancel()
     metadataTask?.cancel()
     metadataTask = nil
-    loadedMetadataFilename = nil
+    metadataFetchTracker.reset()
     connectionState = .connecting
 
     if cameraIsVisible {
-      stopCameraSession()
-      startCameraSessionIfPossible()
+      transitionCameraSession(startAfterStop: true)
     }
 
     monitorTask = Task { [weak self] in
@@ -398,9 +408,7 @@ final class AppModel {
     reducer.apply(objects)
     snapshot = reducer.snapshot
 
-    if !snapshot.filename.isEmpty,
-      loadedMetadataFilename != snapshot.filename
-    {
+    if metadataFetchTracker.beginIfNeeded(for: snapshot.filename) {
       fetchMetadata(
         filename: snapshot.filename,
         client: client,
@@ -420,7 +428,6 @@ final class AppModel {
     client: MoonrakerClient,
     printer: SavedPrinter
   ) {
-    loadedMetadataFilename = filename
     metadataTask?.cancel()
     metadataTask = Task { [weak self] in
       do {
@@ -436,10 +443,15 @@ final class AppModel {
         reducer.setMetadata(metadata, for: filename)
         snapshot = reducer.snapshot
       } catch {
-        guard let self, !Task.isCancelled else {
+        guard let self,
+          !Task.isCancelled,
+          selectedPrinter == printer,
+          snapshot.filename == filename
+        else {
           return
         }
 
+        metadataFetchTracker.didFail(for: filename)
         reducer.setMetadata(nil, for: filename)
         snapshot = reducer.snapshot
       }
@@ -447,26 +459,53 @@ final class AppModel {
   }
 
   private func performCommand(
+    for printer: SavedPrinter,
     _ operation: @escaping @Sendable () async throws -> Void
   ) {
-    isCommandPending = true
     commandTask?.cancel()
+    commandGeneration += 1
+    let generation = commandGeneration
+    isCommandPending = true
     commandTask = Task { [weak self] in
       defer {
-        self?.isCommandPending = false
+        if let self, commandGeneration == generation {
+          isCommandPending = false
+          commandTask = nil
+        }
       }
 
       do {
         try await operation()
+        try Task.checkCancellation()
+      } catch is CancellationError {
+        return
       } catch {
-        self?.present(error)
+        guard let self,
+          commandGeneration == generation,
+          selectedPrinter == printer
+        else {
+          return
+        }
+
+        present(error)
       }
     }
   }
 
-  private func applyConfirmedLEDState(_ isOn: Bool) {
+  func applyConfirmedLEDState(_ isOn: Bool, for printer: SavedPrinter) {
+    guard selectedPrinter == printer, !Task.isCancelled else {
+      return
+    }
+
     reducer.setLEDState(isOn)
     snapshot = reducer.snapshot
+  }
+
+  private func cancelCommand() {
+    commandGeneration += 1
+    commandTask?.cancel()
+    commandTask = nil
+    isCommandPending = false
   }
 
   private func startCameraSessionIfPossible() {
@@ -477,7 +516,7 @@ final class AppModel {
       return
     }
 
-    let client = CameraClient(printer: selectedPrinter)
+    let client = cameraClientFactory(selectedPrinter)
     cameraClient = client
     cameraStatus = "Starting camera"
 
@@ -496,7 +535,6 @@ final class AppModel {
             cameraIsVisible,
             cameraClient === client
           else {
-            await client.stopMonitoring()
             return
           }
 
@@ -517,7 +555,7 @@ final class AppModel {
     }
   }
 
-  private func startCameraKeepalive(with client: CameraClient) {
+  private func startCameraKeepalive(with client: any CameraSessionClient) {
     cameraKeepaliveTask?.cancel()
     cameraKeepaliveTask = Task { [weak self] in
       while let self,
@@ -548,7 +586,7 @@ final class AppModel {
     }
   }
 
-  private func startCameraPolling(with client: CameraClient) {
+  private func startCameraPolling(with client: any CameraSessionClient) {
     cameraPollingTask?.cancel()
     cameraPollingTask = Task { [weak self] in
       var consecutiveFailures = 0
@@ -620,6 +658,10 @@ final class AppModel {
   }
 
   private func stopCameraSession() {
+    transitionCameraSession(startAfterStop: false)
+  }
+
+  private func transitionCameraSession(startAfterStop: Bool) {
     cameraStartTask?.cancel()
     cameraPollingTask?.cancel()
     cameraKeepaliveTask?.cancel()
@@ -629,10 +671,29 @@ final class AppModel {
 
     let client = cameraClient
     cameraClient = nil
-    cameraStatus = "Camera idle"
+    cameraImage = nil
+    cameraFrameDate = nil
+    cameraStatus = startAfterStop && cameraIsVisible ? "Starting camera" : "Camera idle"
 
-    Task {
+    cameraTransitionGeneration += 1
+    let generation = cameraTransitionGeneration
+    let previousTransition = cameraTransitionTask
+    cameraTransitionTask = Task { [weak self] in
+      await previousTransition?.value
       await client?.stopMonitoring()
+
+      guard let self,
+        cameraTransitionGeneration == generation
+      else {
+        return
+      }
+
+      cameraTransitionTask = nil
+      guard startAfterStop, cameraIsVisible else {
+        return
+      }
+
+      startCameraSessionIfPossible()
     }
   }
 

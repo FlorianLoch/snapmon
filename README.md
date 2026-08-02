@@ -1,6 +1,10 @@
-# Snapmaker Monitor
+# SnapMon
 
-Snapmaker Monitor is a native macOS SwiftUI application for monitoring one Snapmaker U1 in LAN mode.
+Monitor your Snapmaker U1.
+
+SnapMon is an independent native macOS SwiftUI application for monitoring one Snapmaker U1 in LAN mode.
+
+SnapMon is not affiliated with, endorsed by, or an official product of Snapmaker.
 
 It discovers printers over Bonjour, displays the U1 camera feed, tracks print progress and ETA, controls the cavity LED, pauses or resumes a print, and sends a local notification when an observed print finishes.
 
@@ -9,20 +13,20 @@ It discovers printers over Bonjour, displays the U1 camera feed, tracks print pr
 - macOS 14 or later
 - A Snapmaker U1 with LAN mode enabled
 - The Mac and printer on the same local network
-- Xcode 15 or later, or the matching Apple command-line tools
+- Xcode 26 or later, used to compile the Icon Composer app icon
 
 ## Run during development
 
-Open `Package.swift` in Xcode and run the `SnapmakerMonitor` executable.
+Open `Package.swift` in Xcode and run the `SnapMon` executable.
 
 For local-network privacy declarations and notification delivery, use the bundled application produced by the build script:
 
 ```sh
 ./scripts/build-app.sh
-open "build/Snapmaker Monitor.app"
+open "build/SnapMon.app"
 ```
 
-The script creates an ad-hoc signed application in `build/`.
+The script compiles `Resources/snapmon.icon` and creates an ad-hoc signed application in `build/`.
 
 For distribution, replace the bundle identifier and sign the application with your Developer ID.
 

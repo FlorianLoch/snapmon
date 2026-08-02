@@ -15,7 +15,7 @@ struct ContentView: View {
       model.start()
     }
     .alert(
-      "Snapmaker Monitor",
+      "SnapMon",
       isPresented: Binding(
         get: { model.lastErrorMessage != nil },
         set: { isPresented in

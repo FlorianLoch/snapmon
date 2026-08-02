@@ -3,23 +3,23 @@
 import PackageDescription
 
 let package = Package(
-  name: "SnapmakerMonitor",
+  name: "SnapMon",
   platforms: [
     .macOS(.v14)
   ],
   products: [
     .executable(
-      name: "SnapmakerMonitor",
-      targets: ["SnapmakerMonitor"]
+      name: "SnapMon",
+      targets: ["SnapMon"]
     )
   ],
   targets: [
     .executableTarget(
-      name: "SnapmakerMonitor"
+      name: "SnapMon"
     ),
     .testTarget(
-      name: "SnapmakerMonitorTests",
-      dependencies: ["SnapmakerMonitor"]
+      name: "SnapMonTests",
+      dependencies: ["SnapMon"]
     ),
   ],
   swiftLanguageVersions: [.v5]

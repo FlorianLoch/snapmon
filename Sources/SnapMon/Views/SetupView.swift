@@ -11,8 +11,11 @@ struct SetupView: View {
         .foregroundStyle(.tint)
 
       VStack(spacing: 8) {
-        Text("Find your Snapmaker U1")
+        Text("SnapMon")
           .font(AppTypography.largeTitle.weight(.semibold))
+
+        Text("Monitor your Snapmaker U1")
+          .font(AppTypography.headline)
 
         Text("LAN mode must be enabled and the printer must be on this network.")
           .foregroundStyle(.secondary)

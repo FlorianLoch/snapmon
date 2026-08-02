@@ -12,7 +12,7 @@ final class BonjourDiscoveryService: @unchecked Sendable {
       parameters.includePeerToPeer = false
 
       let browser = NWBrowser(for: descriptor, using: parameters)
-      let queue = DispatchQueue(label: "local.snapmaker-monitor.discovery")
+      let queue = DispatchQueue(label: "local.snapmon.discovery")
 
       browser.browseResultsChangedHandler = { results, _ in
         let devices =

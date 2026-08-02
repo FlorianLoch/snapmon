@@ -1,6 +1,6 @@
 import XCTest
 
-@testable import SnapmakerMonitor
+@testable import SnapMon
 
 @MainActor
 final class AppearancePreferencesTests: XCTestCase {

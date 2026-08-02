@@ -1,6 +1,6 @@
 import XCTest
 
-@testable import SnapmakerMonitor
+@testable import SnapMon
 
 final class CompletionTrackerTests: XCTestCase {
   private let printer = SavedPrinter(
@@ -49,5 +49,25 @@ final class CompletionTrackerTests: XCTestCase {
 
     snapshot.state = .complete
     XCTAssertNotNil(tracker.observe(snapshot, printer: printer))
+  }
+
+  func testReplacesTrackedJobWhenActiveFilenameChanges() {
+    var tracker = CompletionTracker()
+    var snapshot = PrinterSnapshot()
+    let firstStart = Date(timeIntervalSince1970: 1_000)
+    let secondStart = firstStart.addingTimeInterval(500)
+
+    snapshot.state = .printing
+    snapshot.filename = "first.gcode"
+    XCTAssertNil(tracker.observe(snapshot, printer: printer, now: firstStart))
+
+    snapshot.filename = "second.gcode"
+    XCTAssertNil(tracker.observe(snapshot, printer: printer, now: secondStart))
+
+    snapshot.state = .complete
+    let event = tracker.observe(snapshot, printer: printer)
+
+    XCTAssertEqual(event?.job.filename, "second.gcode")
+    XCTAssertEqual(event?.job.observedStart, secondStart)
   }
 }
