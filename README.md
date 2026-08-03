@@ -1,12 +1,14 @@
 # SnapMon
 
+<img src="snapmon.png" alt="SnapMon app icon" width="256">
+
 Monitor your Snapmaker U1.
 
-SnapMon is an independent native macOS SwiftUI application for monitoring one Snapmaker U1 in LAN mode.
-
-SnapMon is not affiliated with, endorsed by, or an official product of Snapmaker.
+SnapMon is native macOS SwiftUI application for monitoring a Snapmaker U1 in LAN mode.
 
 It discovers printers over Bonjour, displays the U1 camera feed, tracks print progress and ETA, controls the cavity LED, pauses or resumes a print, and sends a local notification when an observed print finishes.
+
+_SnapMon is not affiliated with, endorsed by, or an official product of Snapmaker._
 
 ## Requirements
 
@@ -15,11 +17,12 @@ It discovers printers over Bonjour, displays the U1 camera feed, tracks print pr
 - The Mac and printer on the same local network
 - Xcode 26 or later, used to compile the Icon Composer app icon
 
-## Run during development
+## Run
 
-Open `Package.swift` in Xcode and run the `SnapMon` executable.
+Because I am not a verified developer with Apple's developer program, I cannot distribute properly signed binaries.
 
-For local-network privacy declarations and notification delivery, use the bundled application produced by the build script:
+Therefore, you have to build the app yourself. 
+Assuming you have Apple's XCode installed it is pretty straight-forward:
 
 ```sh
 ./scripts/build-app.sh
@@ -28,7 +31,9 @@ open "build/SnapMon.app"
 
 The script compiles `Resources/snapmon.icon` and creates an ad-hoc signed application in `build/`.
 
-For distribution, replace the bundle identifier and sign the application with your Developer ID.
+## Run during development
+
+Open `Package.swift` in Xcode and run the `SnapMon` executable.
 
 ## Tests
 
@@ -38,8 +43,12 @@ For distribution, replace the bundle identifier and sign the application with yo
 
 ## Network behavior
 
-The app browses `_snapmaker._tcp`, accepts only `Snapmaker U1` devices in `lan` mode, and talks directly to Moonraker over the local network.
+The app browses `_snapmaker._tcp`, accepts only `Snapmaker U1` devices in `lan` mode, and talks directly to `Moonraker` over the local network.
 
 No Snapmaker cloud account or WAN connection is used.
 
-The camera setting `max_frame_rate` is persisted in `UserDefaults`, accepts values from 1 through 10 FPS, and defaults to 5 FPS.
+## Disclaimer
+
+I am no Swift developer.
+
+Therefore, this app has been developed using AI.
