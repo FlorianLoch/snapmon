@@ -233,6 +233,24 @@ final class AppModel {
     }
   }
 
+  func setSpeedModifier(_ percentage: Int) {
+    guard let printer = selectedPrinter,
+      connectionState.isConnected,
+      !isCommandPending,
+      snapshot.state.isActive,
+      PrinterSpeedModifier.values.contains(percentage)
+    else {
+      return
+    }
+
+    performCommand(for: printer) {
+      let confirmedModifier = try await MoonrakerClient(printer: printer)
+        .setSpeedModifier(percentage)
+      try Task.checkCancellation()
+      await self.applyConfirmedSpeedModifier(confirmedModifier, for: printer)
+    }
+  }
+
   func requestNotificationPermission() async {
     do {
       _ = try await notificationService.requestPermission()
@@ -498,6 +516,15 @@ final class AppModel {
     }
 
     reducer.setLEDState(isOn)
+    snapshot = reducer.snapshot
+  }
+
+  func applyConfirmedSpeedModifier(_ percentage: Int, for printer: SavedPrinter) {
+    guard selectedPrinter == printer, !Task.isCancelled else {
+      return
+    }
+
+    reducer.setSpeedModifier(percentage)
     snapshot = reducer.snapshot
   }
 

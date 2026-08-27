@@ -55,6 +55,12 @@ struct PrinterStateReducer {
 
     snapshot.nozzle = extruderReadings[snapshot.activeExtruder] ?? snapshot.nozzle
 
+    if let gcodeMove = objects["gcode_move"]?.objectValue,
+      let speedFactor = gcodeMove["speed_factor"]?.doubleValue
+    {
+      snapshot.speedModifier = Int((speedFactor * 100).rounded())
+    }
+
     if let led = objects["led cavity_led"]?.objectValue,
       let colors = led["color_data"]?.arrayValue
     {
@@ -84,6 +90,11 @@ struct PrinterStateReducer {
 
   mutating func setLEDState(_ isOn: Bool) {
     snapshot.ledOn = isOn
+    snapshot.updatedAt = Date()
+  }
+
+  mutating func setSpeedModifier(_ percentage: Int) {
+    snapshot.speedModifier = percentage
     snapshot.updatedAt = Date()
   }
 

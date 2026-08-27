@@ -131,6 +131,24 @@ struct TemperatureReading: Equatable, Sendable {
   var target: Double?
 }
 
+enum PrinterSpeedModifier {
+  static let values = [50, 80, 100, 120, 150]
+  static let defaultValue = 100
+
+  static func closestIndex(to value: Int) -> Int {
+    values.indices.min {
+      abs(values[$0] - value) < abs(values[$1] - value)
+    } ?? values.startIndex
+  }
+
+  static func value(at index: Double) -> Int {
+    let roundedIndex = Int(index.rounded())
+    let clampedIndex = min(
+      max(roundedIndex, values.startIndex), values.index(before: values.endIndex))
+    return values[clampedIndex]
+  }
+}
+
 struct PrinterSnapshot: Equatable, Sendable {
   var state: PrintState = .unknown
   var filename = ""
@@ -143,6 +161,7 @@ struct PrinterSnapshot: Equatable, Sendable {
   var bed = TemperatureReading()
   var nozzle = TemperatureReading()
   var activeExtruder = "extruder"
+  var speedModifier = PrinterSpeedModifier.defaultValue
   var ledOn = false
   var updatedAt: Date?
 

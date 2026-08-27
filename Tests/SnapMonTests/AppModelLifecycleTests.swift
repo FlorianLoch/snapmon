@@ -5,7 +5,7 @@ import XCTest
 
 @MainActor
 final class AppModelLifecycleTests: XCTestCase {
-  func testPrinterSwitchClearsPendingCommandAndRejectsOldLEDResult() {
+  func testPrinterSwitchClearsPendingCommandAndRejectsOldCommandResults() {
     let model = AppModel(defaults: isolatedDefaults())
     let previousPrinter = printer(serial: "old", host: "127.0.0.1")
     let replacementPrinter = printer(serial: "new", host: "127.0.0.2")
@@ -14,9 +14,11 @@ final class AppModelLifecycleTests: XCTestCase {
 
     model.select(replacementPrinter)
     model.applyConfirmedLEDState(true, for: previousPrinter)
+    model.applyConfirmedSpeedModifier(150, for: previousPrinter)
 
     XCTAssertFalse(model.isCommandPending)
     XCTAssertFalse(model.snapshot.ledOn)
+    XCTAssertEqual(model.snapshot.speedModifier, 100)
     model.shutdown()
   }
 

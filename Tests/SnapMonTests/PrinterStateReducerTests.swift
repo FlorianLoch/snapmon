@@ -103,6 +103,31 @@ final class PrinterStateReducerTests: XCTestCase {
     XCTAssertTrue(reducer.snapshot.ledOn)
   }
 
+  func testReadsSpeedModifier() {
+    var reducer = PrinterStateReducer()
+
+    reducer.apply(
+      [
+        "gcode_move": .object([
+          "speed_factor": .number(1.2)
+        ])
+      ]
+    )
+
+    XCTAssertEqual(reducer.snapshot.speedModifier, 120)
+  }
+
+  func testSpeedModifierUsesRequestedDiscreteValues() {
+    XCTAssertEqual(PrinterSpeedModifier.values, [50, 80, 100, 120, 150])
+    XCTAssertEqual(PrinterSpeedModifier.defaultValue, 100)
+    XCTAssertEqual(
+      PrinterSpeedModifier.values.indices.map {
+        PrinterSpeedModifier.value(at: Double($0))
+      },
+      PrinterSpeedModifier.values
+    )
+  }
+
   func testAppliesConfirmedLEDReadback() {
     var reducer = PrinterStateReducer()
 

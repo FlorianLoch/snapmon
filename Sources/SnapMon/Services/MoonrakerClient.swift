@@ -123,6 +123,7 @@ final class MoonrakerClient: @unchecked Sendable {
                     "extruder1": ["temperature", "target"],
                     "extruder2": ["temperature", "target"],
                     "extruder3": ["temperature", "target"],
+                    "gcode_move": ["speed_factor"],
                     "led cavity_led": ["color_data"],
                   ]
                 ],
@@ -208,6 +209,7 @@ final class MoonrakerClient: @unchecked Sendable {
         URLQueryItem(name: "extruder1", value: "temperature,target"),
         URLQueryItem(name: "extruder2", value: "temperature,target"),
         URLQueryItem(name: "extruder3", value: "temperature,target"),
+        URLQueryItem(name: "gcode_move", value: "speed_factor"),
         URLQueryItem(name: "led cavity_led", value: "color_data"),
       ]
     )
@@ -224,6 +226,32 @@ final class MoonrakerClient: @unchecked Sendable {
 
   func resume() async throws {
     _ = try await request(path: "/printer/print/resume", method: "POST")
+  }
+
+  func setSpeedModifier(_ percentage: Int) async throws -> Int {
+    guard PrinterSpeedModifier.values.contains(percentage) else {
+      throw MonitorError.server("Unsupported printer speed modifier: \(percentage)%.")
+    }
+
+    _ = try await request(
+      path: "/printer/gcode/script",
+      method: "POST",
+      body: ["script": "M220 S\(percentage)"]
+    )
+
+    for attempt in 0..<5 {
+      let currentModifier = try await speedModifier()
+
+      if currentModifier == percentage {
+        return currentModifier
+      }
+
+      if attempt < 4 {
+        try await Task.sleep(nanoseconds: 150_000_000)
+      }
+    }
+
+    throw MonitorError.server("The printer did not confirm the requested speed modifier.")
   }
 
   func setLED(on: Bool) async throws -> Bool {
@@ -270,6 +298,25 @@ final class MoonrakerClient: @unchecked Sendable {
       .flatMap { $0.arrayValue ?? [$0] }
       .compactMap(\.doubleValue)
       .contains { $0 > 0.01 }
+  }
+
+  private func speedModifier() async throws -> Int {
+    let response = try await get(
+      path: "/printer/objects/query",
+      queryItems: [
+        URLQueryItem(name: "gcode_move", value: "speed_factor")
+      ]
+    )
+    guard
+      let speedFactor =
+        response
+        .value(at: "result", "status", "gcode_move", "speed_factor")?
+        .doubleValue
+    else {
+      throw MonitorError.invalidResponse
+    }
+
+    return Int((speedFactor * 100).rounded())
   }
 
   private func get(

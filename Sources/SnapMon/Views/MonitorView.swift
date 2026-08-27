@@ -78,6 +78,10 @@ private struct CameraView: View {
 
 private struct InspectorView: View {
   @Environment(AppModel.self) private var model
+  @State private var selectedSpeedIndex = Double(
+    PrinterSpeedModifier.closestIndex(to: PrinterSpeedModifier.defaultValue)
+  )
+  @State private var isAdjustingSpeed = false
 
   var body: some View {
     VStack(alignment: .leading, spacing: 0) {
@@ -210,14 +214,22 @@ private struct InspectorView: View {
   private var controls: some View {
     VStack(spacing: 12) {
       Toggle(
-        "LED strip",
         isOn: Binding(
           get: { model.snapshot.ledOn },
           set: { model.setLED(on: $0) }
         )
-      )
+      ) {
+        HStack {
+          Text("LED strip")
+          Spacer()
+        }
+      }
       .toggleStyle(.switch)
+      .frame(maxWidth: .infinity)
       .disabled(!model.connectionState.isConnected || model.isCommandPending)
+
+      speedControl
+        .padding(.bottom, 24)
 
       Button {
         model.togglePause()
@@ -236,6 +248,66 @@ private struct InspectorView: View {
           || !model.snapshot.state.isActive
       )
     }
+  }
+
+  private var speedControl: some View {
+    VStack(alignment: .leading, spacing: 6) {
+      HStack {
+        Text("Print speed")
+        Spacer()
+        Text("\(selectedSpeedModifier)%")
+          .monospacedDigit()
+          .foregroundStyle(.secondary)
+      }
+
+      Slider(
+        value: $selectedSpeedIndex,
+        in: 0...Double(PrinterSpeedModifier.values.count - 1),
+        step: 1
+      ) {
+        Text("Print speed")
+      } onEditingChanged: { isEditing in
+        isAdjustingSpeed = isEditing
+
+        if !isEditing, selectedSpeedModifier != model.snapshot.speedModifier {
+          model.setSpeedModifier(selectedSpeedModifier)
+        }
+      }
+      .labelsHidden()
+      .accessibilityValue("\(selectedSpeedModifier) percent")
+
+      HStack(spacing: 0) {
+        ForEach(PrinterSpeedModifier.values, id: \.self) { percentage in
+          Text("\(percentage)%")
+            .frame(maxWidth: .infinity)
+        }
+      }
+      .font(AppTypography.caption.monospacedDigit())
+      .foregroundStyle(.secondary)
+    }
+    .disabled(
+      !model.connectionState.isConnected
+        || model.isCommandPending
+        || !model.snapshot.state.isActive
+    )
+    .onAppear {
+      synchronizeSpeedSelection(with: model.snapshot.speedModifier)
+    }
+    .onChange(of: model.snapshot.speedModifier) { _, percentage in
+      guard !isAdjustingSpeed else {
+        return
+      }
+
+      synchronizeSpeedSelection(with: percentage)
+    }
+  }
+
+  private var selectedSpeedModifier: Int {
+    PrinterSpeedModifier.value(at: selectedSpeedIndex)
+  }
+
+  private func synchronizeSpeedSelection(with percentage: Int) {
+    selectedSpeedIndex = Double(PrinterSpeedModifier.closestIndex(to: percentage))
   }
 
   private var layerDescription: String {

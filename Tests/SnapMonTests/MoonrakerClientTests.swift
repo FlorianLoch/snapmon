@@ -48,6 +48,45 @@ final class MoonrakerClientTests: XCTestCase {
     )
   }
 
+  func testSpeedModifierCommandWaitsForConfirmedReadback() async throws {
+    let configuration = URLSessionConfiguration.ephemeral
+    configuration.protocolClasses = [MockURLProtocol.self]
+    let session = URLSession(configuration: configuration)
+    let printer = SavedPrinter(
+      name: "U1",
+      host: "192.168.1.42",
+      serialNumber: "U1-123",
+      firmwareVersion: "1.5.1"
+    )
+    let client = MoonrakerClient(printer: printer, session: session)
+
+    let confirmedModifier = try await client.setSpeedModifier(120)
+
+    XCTAssertEqual(confirmedModifier, 120)
+    let requests = MockURLProtocol.recordedRequests()
+    XCTAssertEqual(
+      requests.map { $0.url?.path },
+      [
+        "/printer/gcode/script",
+        "/printer/objects/query",
+      ])
+
+    let body = try XCTUnwrap(MockURLProtocol.recordedBodies().first ?? nil)
+    let json = try XCTUnwrap(
+      JSONSerialization.jsonObject(with: body) as? [String: String]
+    )
+    XCTAssertEqual(json["script"], "M220 S120")
+
+    let queryItems = URLComponents(
+      url: try XCTUnwrap(requests.last?.url),
+      resolvingAgainstBaseURL: false
+    )?.queryItems
+    XCTAssertEqual(
+      queryItems?.first(where: { $0.name == "gcode_move" })?.value,
+      "speed_factor"
+    )
+  }
+
   func testCurrentStatusRequestsContinuouslyChangingObjects() async throws {
     let configuration = URLSessionConfiguration.ephemeral
     configuration.protocolClasses = [MockURLProtocol.self]
@@ -87,6 +126,7 @@ final class MoonrakerClientTests: XCTestCase {
         "extruder1",
         "extruder2",
         "extruder3",
+        "gcode_move",
         "led cavity_led",
       ]))
   }
@@ -138,6 +178,8 @@ private final class MockURLProtocol: URLProtocol {
           }
         }
         """
+    } else if queryItems?.contains(where: { $0.name == "gcode_move" }) == true {
+      json = #"{"result":{"status":{"gcode_move":{"speed_factor":1.2}}}}"#
     } else {
       json =
         #"{"result":{"status":{"led cavity_led":{"color_data":[[0,0,0,0]]}}}}"#
