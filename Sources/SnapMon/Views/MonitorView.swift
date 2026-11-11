@@ -133,7 +133,7 @@ private struct InspectorView: View {
         ConnectionBadge(state: model.connectionState)
       }
 
-      if let version = model.selectedPrinter?.firmwareVersion {
+      if let version = model.firmwareVersion {
         Text("Firmware \(version)")
           .font(AppTypography.caption)
           .foregroundStyle(.secondary)

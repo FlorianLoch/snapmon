@@ -9,6 +9,20 @@ final class MoonrakerClientTests: XCTestCase {
     MockURLProtocol.reset()
   }
 
+  func testReadsFirmwareFromPrinterProductInfo() async throws {
+    let configuration = URLSessionConfiguration.ephemeral
+    configuration.protocolClasses = [MockURLProtocol.self]
+    let client = MoonrakerClient(
+      printer: SavedPrinter(name: "U1", host: "192.168.1.42", serialNumber: "U1-123"),
+      session: URLSession(configuration: configuration)
+    )
+
+    let version = try await client.firmwareVersion()
+
+    XCTAssertEqual(version, "1.6.0")
+    XCTAssertEqual(MockURLProtocol.recordedRequests().map { $0.url?.path }, ["/machine/system_info"])
+  }
+
   func testLEDCommandWaitsForConfirmedReadback() async throws {
     let configuration = URLSessionConfiguration.ephemeral
     configuration.protocolClasses = [MockURLProtocol.self]
@@ -16,8 +30,7 @@ final class MoonrakerClientTests: XCTestCase {
     let printer = SavedPrinter(
       name: "U1",
       host: "192.168.1.42",
-      serialNumber: "U1-123",
-      firmwareVersion: "1.5.1"
+      serialNumber: "U1-123"
     )
     let client = MoonrakerClient(printer: printer, session: session)
 
@@ -55,8 +68,7 @@ final class MoonrakerClientTests: XCTestCase {
     let printer = SavedPrinter(
       name: "U1",
       host: "192.168.1.42",
-      serialNumber: "U1-123",
-      firmwareVersion: "1.5.1"
+      serialNumber: "U1-123"
     )
     let client = MoonrakerClient(printer: printer, session: session)
 
@@ -94,8 +106,7 @@ final class MoonrakerClientTests: XCTestCase {
     let printer = SavedPrinter(
       name: "U1",
       host: "192.168.1.42",
-      serialNumber: "U1-123",
-      firmwareVersion: "1.5.1"
+      serialNumber: "U1-123"
     )
     let client = MoonrakerClient(printer: printer, session: session)
 
@@ -162,6 +173,8 @@ private final class MockURLProtocol: URLProtocol {
 
     if request.url?.path == "/printer/gcode/script" {
       json = #"{"result":"ok"}"#
+    } else if request.url?.path == "/machine/system_info" {
+      json = #"{"result":{"system_info":{"product_info":{"firmware_version":"1.6.0"}}}}"#
     } else if queryItems?.contains(where: { $0.name == "print_stats" }) == true {
       json =
         """

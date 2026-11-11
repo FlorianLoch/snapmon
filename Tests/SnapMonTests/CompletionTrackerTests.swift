@@ -6,8 +6,7 @@ final class CompletionTrackerTests: XCTestCase {
   private let printer = SavedPrinter(
     name: "Workshop U1",
     host: "192.168.1.42",
-    serialNumber: "U1-123",
-    firmwareVersion: "1.5.0"
+    serialNumber: "U1-123"
   )
 
   func testDoesNotNotifyForCompleteStateAtStartup() {

@@ -20,6 +20,7 @@ final class AppModel {
   private var discoveryTask: Task<Void, Never>?
   private var monitorTask: Task<Void, Never>?
   private var statusPollingTask: Task<Void, Never>?
+  private var firmwareTask: Task<Void, Never>?
   private var metadataTask: Task<Void, Never>?
   private var commandTask: Task<Void, Never>?
   private var cameraStartTask: Task<Void, Never>?
@@ -36,6 +37,7 @@ final class AppModel {
   private var cameraTransitionGeneration = 0
 
   var selectedPrinter: SavedPrinter?
+  private(set) var firmwareVersion: String?
   var discoveredDevices: [DiscoveredDevice] = []
   var connectionState: ConnectionState = .disconnected
   var snapshot = PrinterSnapshot()
@@ -147,9 +149,11 @@ final class AppModel {
 
   func forgetPrinter() {
     selectedPrinter = nil
+    firmwareVersion = nil
     defaults.removeObject(forKey: DefaultsKey.selectedPrinter)
     monitorTask?.cancel()
     statusPollingTask?.cancel()
+    firmwareTask?.cancel()
     metadataTask?.cancel()
     cancelCommand()
     monitorTask = nil
@@ -272,6 +276,7 @@ final class AppModel {
     discoveryTask?.cancel()
     monitorTask?.cancel()
     statusPollingTask?.cancel()
+    firmwareTask?.cancel()
     metadataTask?.cancel()
     cancelCommand()
     stopCameraSession()
@@ -320,10 +325,12 @@ final class AppModel {
     cancelCommand()
     monitorTask?.cancel()
     statusPollingTask?.cancel()
+    firmwareTask?.cancel()
     metadataTask?.cancel()
     metadataTask = nil
     metadataFetchTracker.reset()
     connectionState = .connecting
+    firmwareVersion = nil
 
     if cameraIsVisible {
       transitionCameraSession(startAfterStop: true)
@@ -334,6 +341,18 @@ final class AppModel {
     }
     statusPollingTask = Task { [weak self] in
       await self?.pollStatus(printer)
+    }
+    firmwareTask = Task { [weak self] in
+      guard !Task.isCancelled else {
+        return
+      }
+
+      let version = try? await MoonrakerClient(printer: printer).firmwareVersion()
+      guard !Task.isCancelled else {
+        return
+      }
+
+      self?.firmwareVersion = version
     }
   }
 

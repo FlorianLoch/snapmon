@@ -5,6 +5,20 @@ import XCTest
 
 @MainActor
 final class AppModelLifecycleTests: XCTestCase {
+  func testRestoresSavedPrinterWithoutDisplayingCachedFirmware() {
+    let defaults = isolatedDefaults()
+    let savedPrinter = """
+      {"name":"U1","host":"127.0.0.1","serialNumber":"U1-123","firmwareVersion":"1.5.1"}
+      """
+    defaults.set(Data(savedPrinter.utf8), forKey: "selected_printer")
+
+    let model = AppModel(defaults: defaults)
+
+    XCTAssertEqual(model.selectedPrinter?.serialNumber, "U1-123")
+    XCTAssertEqual(model.selectedPrinter?.host, "127.0.0.1")
+    XCTAssertNil(model.firmwareVersion)
+  }
+
   func testPrinterSwitchClearsPendingCommandAndRejectsOldCommandResults() {
     let model = AppModel(defaults: isolatedDefaults())
     let previousPrinter = printer(serial: "old", host: "127.0.0.1")
@@ -105,8 +119,7 @@ final class AppModelLifecycleTests: XCTestCase {
     SavedPrinter(
       name: "U1",
       host: host,
-      serialNumber: serial,
-      firmwareVersion: "1.5.1"
+      serialNumber: serial
     )
   }
 

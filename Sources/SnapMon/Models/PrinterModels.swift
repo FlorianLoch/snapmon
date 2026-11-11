@@ -99,8 +99,7 @@ struct DiscoveredDevice: Identifiable, Hashable, Codable, Sendable {
     SavedPrinter(
       name: name,
       host: host,
-      serialNumber: serialNumber.isEmpty ? id : serialNumber,
-      firmwareVersion: firmwareVersion
+      serialNumber: serialNumber.isEmpty ? id : serialNumber
     )
   }
 
@@ -113,7 +112,6 @@ struct SavedPrinter: Codable, Equatable, Sendable {
   let name: String
   let host: String
   let serialNumber: String
-  let firmwareVersion: String?
 
   var id: String {
     serialNumber

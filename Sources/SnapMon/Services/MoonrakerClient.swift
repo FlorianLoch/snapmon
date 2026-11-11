@@ -24,20 +24,10 @@ final class MoonrakerClient: @unchecked Sendable {
     let placeholder = SavedPrinter(
       name: host,
       host: host,
-      serialNumber: host,
-      firmwareVersion: nil
+      serialNumber: host
     )
     let client = MoonrakerClient(printer: placeholder)
-    let response = try await client.get(path: "/machine/system_info")
-
-    guard
-      let productInfo =
-        response
-        .value(at: "result", "system_info", "product_info")?
-        .objectValue
-    else {
-      throw MonitorError.invalidResponse
-    }
+    let productInfo = try await client.productInfo()
 
     let model =
       productInfo["machine_type"]?.stringValue
@@ -56,16 +46,25 @@ final class MoonrakerClient: @unchecked Sendable {
       productInfo["serial_number"]?.stringValue
       ?? productInfo["sn"]?.stringValue
       ?? host
-    let firmware =
-      productInfo["firmware_version"]?.stringValue
-      ?? productInfo["version"]?.stringValue
-
     return SavedPrinter(
       name: name,
       host: host,
-      serialNumber: serial,
-      firmwareVersion: firmware
+      serialNumber: serial
     )
+  }
+
+  func firmwareVersion() async throws -> String? {
+    let productInfo = try await productInfo()
+    return productInfo["firmware_version"]?.stringValue
+      ?? productInfo["version"]?.stringValue
+  }
+
+  private func productInfo() async throws -> [String: JSONValue] {
+    let response = try await get(path: "/machine/system_info")
+    guard let info = response.value(at: "result", "system_info", "product_info")?.objectValue else {
+      throw MonitorError.invalidResponse
+    }
+    return info
   }
 
   func statusUpdates() -> AsyncThrowingStream<[String: JSONValue], Error> {
