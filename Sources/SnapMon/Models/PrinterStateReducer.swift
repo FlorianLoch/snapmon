@@ -8,7 +8,6 @@ struct PrinterStateReducer {
   private var filePosition: Double?
   private var virtualProgress: Double?
   private var displayProgress: Double?
-  private var extruderReadings: [String: TemperatureReading] = [:]
 
   mutating func reset() {
     self = PrinterStateReducer()
@@ -36,24 +35,30 @@ struct PrinterStateReducer {
       snapshot.bed = temperature(from: heaterBed, previous: snapshot.bed)
     }
 
+    if let chamber = objects["temperature_sensor cavity"]?["temperature"] {
+      snapshot.chamber.current = chamber.doubleValue
+    }
+
     if let toolhead = objects["toolhead"]?.objectValue,
       let activeExtruder = toolhead["extruder"]?.stringValue
     {
       snapshot.activeExtruder = activeExtruder
     }
 
-    for name in ["extruder", "extruder1", "extruder2", "extruder3"] {
+    for name in PrinterSnapshot.extruderNames {
       guard let status = objects[name]?.objectValue else {
         continue
       }
 
-      extruderReadings[name] = temperature(
+      snapshot.nozzles[name] = temperature(
         from: status,
-        previous: extruderReadings[name] ?? TemperatureReading()
+        previous: snapshot.nozzles[name, default: TemperatureReading()]
       )
     }
 
-    snapshot.nozzle = extruderReadings[snapshot.activeExtruder] ?? snapshot.nozzle
+    if let purifier = objects["purifier"]?.objectValue {
+      snapshot.ventilation.apply(purifier)
+    }
 
     if let gcodeMove = objects["gcode_move"]?.objectValue,
       let speedFactor = gcodeMove["speed_factor"]?.doubleValue
@@ -95,6 +100,11 @@ struct PrinterStateReducer {
 
   mutating func setSpeedModifier(_ percentage: Int) {
     snapshot.speedModifier = percentage
+    snapshot.updatedAt = Date()
+  }
+
+  mutating func setFanSpeed(_ speed: Double, for fan: VentilationFan) {
+    snapshot.ventilation.setSpeed(speed, for: fan)
     snapshot.updatedAt = Date()
   }
 

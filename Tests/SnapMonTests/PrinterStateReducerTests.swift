@@ -68,23 +68,108 @@ final class PrinterStateReducerTests: XCTestCase {
         "toolhead": .object([
           "extruder": .string("extruder2")
         ]),
+        "extruder": .object(["temperature": .number(24)]),
+        "extruder1": .object(["temperature": .number(42)]),
         "extruder2": .object([
           "temperature": .number(210),
           "target": .number(220),
         ]),
+        "extruder3": .object(["temperature": .number(31)]),
       ]
     )
     reducer.apply(
       [
         "print_stats": .object([
           "state": .string("paused")
-        ])
+        ]),
+        "toolhead": .object(["extruder": .string("extruder3")]),
+        "extruder2": .object(["temperature": .number(216)]),
       ]
     )
 
     XCTAssertEqual(reducer.snapshot.state, .paused)
     XCTAssertEqual(reducer.snapshot.bed.current, 55)
-    XCTAssertEqual(reducer.snapshot.nozzle.target, 220)
+    XCTAssertEqual(reducer.snapshot.activeExtruder, "extruder3")
+    XCTAssertEqual(reducer.snapshot.nozzles, [
+      "extruder": TemperatureReading(current: 24),
+      "extruder1": TemperatureReading(current: 42),
+      "extruder2": TemperatureReading(current: 216, target: 220),
+      "extruder3": TemperatureReading(current: 31),
+    ])
+  }
+
+  func testReadsChamberAndVentilationAcrossPartialUpdates() {
+    var reducer = PrinterStateReducer()
+
+    reducer.apply([
+      "temperature_sensor cavity": .object(["temperature": .number(36.2)]),
+      "purifier": .object([
+        "power_detected": .bool(true),
+        "mode": .number(1),
+        "exhaust_fan": .object(["speed": .number(0.7)]),
+        "inner_fan": .object(["speed": .number(0.3)]),
+        "inner_fan_rpm": .number(1_240),
+      ]),
+    ])
+
+    XCTAssertEqual(reducer.snapshot.chamber.current, 36.2)
+    XCTAssertEqual(reducer.snapshot.ventilation, VentilationReading(
+      powerDetected: true,
+      mode: .externalCirculation,
+      exhaustSpeed: 0.7,
+      recirculationSpeed: 0.3,
+      recirculationRPM: 1_240
+    ))
+
+    reducer.apply([
+      "purifier": .object([
+        "mode": .number(2),
+        "exhaust_fan": .object(["speed": .number(0)]),
+      ]),
+    ])
+
+    XCTAssertEqual(reducer.snapshot.chamber.current, 36.2)
+    XCTAssertEqual(reducer.snapshot.ventilation.mode, .internalPreheat)
+    XCTAssertEqual(reducer.snapshot.ventilation.exhaustSpeed, 0)
+    XCTAssertEqual(reducer.snapshot.ventilation.recirculationSpeed, 0.3)
+    XCTAssertEqual(reducer.snapshot.ventilation.recirculationRPM, 1_240)
+
+    reducer.apply(["purifier": .object(["mode": .number(3)])])
+    XCTAssertEqual(reducer.snapshot.ventilation.mode, .internalCirculation)
+
+    reducer.apply(["purifier": .object(["mode": .number(0), "inner_fan_rpm": .null])])
+    XCTAssertEqual(reducer.snapshot.ventilation.mode, .standby)
+    XCTAssertNil(reducer.snapshot.ventilation.recirculationRPM)
+
+    reducer.apply(["purifier": .object(["power_detected": .bool(false)])])
+    XCTAssertEqual(reducer.snapshot.ventilation.powerDetected, false)
+
+    reducer.reset()
+    XCTAssertNil(reducer.snapshot.chamber.current)
+    XCTAssertEqual(reducer.snapshot.ventilation, VentilationReading())
+  }
+
+  func testFanSpeedsFollowModeAndFivePercentSteps() {
+    var ventilation = VentilationReading(
+      powerDetected: true, mode: .externalCirculation, exhaustSpeed: 0.6, recirculationSpeed: 0
+    )
+
+    XCTAssertEqual(ventilation.adjustableRange(for: .exhaust), 5...100)
+    XCTAssertFalse(ventilation.allowsSpeed(0, for: .exhaust))
+    XCTAssertTrue(ventilation.allowsSpeed(5, for: .exhaust))
+    XCTAssertFalse(ventilation.allowsSpeed(6, for: .exhaust))
+    XCTAssertTrue(ventilation.allowsSpeed(0, for: .recirculation))
+
+    for mode in [VentilationMode.internalPreheat, .internalCirculation] {
+      ventilation.mode = mode
+      XCTAssertNil(ventilation.adjustableRange(for: .exhaust))
+      XCTAssertEqual(ventilation.adjustableRange(for: .recirculation), 10...100)
+    }
+
+    ventilation.mode = .standby
+    XCTAssertTrue(ventilation.allowsSpeed(0, for: .exhaust))
+    ventilation.powerDetected = false
+    XCTAssertNil(ventilation.adjustableRange(for: .recirculation))
   }
 
   func testReadsLEDColorData() {

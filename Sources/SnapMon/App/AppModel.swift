@@ -255,6 +255,23 @@ final class AppModel {
     }
   }
 
+  func setFanSpeed(_ percentage: Int, for fan: VentilationFan) {
+    guard let printer = selectedPrinter,
+      connectionState.isConnected,
+      !isCommandPending,
+      snapshot.ventilation.allowsSpeed(percentage, for: fan)
+    else {
+      return
+    }
+
+    performCommand(for: printer) {
+      let confirmedSpeed = try await MoonrakerClient(printer: printer)
+        .setFanSpeed(percentage, for: fan)
+      try Task.checkCancellation()
+      await self.applyConfirmedFanSpeed(confirmedSpeed, for: fan, printer: printer)
+    }
+  }
+
   func requestNotificationPermission() async {
     do {
       _ = try await notificationService.requestPermission()
@@ -544,6 +561,15 @@ final class AppModel {
     }
 
     reducer.setSpeedModifier(percentage)
+    snapshot = reducer.snapshot
+  }
+
+  private func applyConfirmedFanSpeed(_ speed: Double, for fan: VentilationFan, printer: SavedPrinter) {
+    guard selectedPrinter == printer, !Task.isCancelled else {
+      return
+    }
+
+    reducer.setFanSpeed(speed, for: fan)
     snapshot = reducer.snapshot
   }
 

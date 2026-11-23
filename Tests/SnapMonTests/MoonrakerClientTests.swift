@@ -137,9 +137,61 @@ final class MoonrakerClientTests: XCTestCase {
         "extruder1",
         "extruder2",
         "extruder3",
+        "temperature_sensor cavity",
+        "purifier",
         "gcode_move",
         "led cavity_led",
       ]))
+    XCTAssertEqual(queryItems?.first { $0.name == "temperature_sensor cavity" }?.value, "temperature")
+    let purifierFields = queryItems?.first { $0.name == "purifier" }?.value?.split(separator: ",")
+    XCTAssertEqual(
+      Set(purifierFields ?? []),
+      ["power_detected", "mode", "exhaust_fan", "inner_fan", "inner_fan_rpm"]
+    )
+  }
+
+  func testFanSpeedUsesPurifierControlAndConfirmsReadback() async throws {
+    let client = makeMockClient()
+
+    let speed = try await client.setFanSpeed(5, for: .exhaust)
+
+    XCTAssertEqual(speed, 0.05)
+    let requests = MockURLProtocol.recordedRequests()
+    XCTAssertEqual(requests.map(\.httpMethod), ["GET", "POST", "GET"])
+    XCTAssertEqual(requests.map { $0.url?.path }, [
+      "/printer/objects/query", "/printer/control/purifier", "/printer/objects/query",
+    ])
+    XCTAssertEqual(requests.first?.url?.query, "purifier=power_detected,mode,exhaust_fan")
+    XCTAssertEqual(requests.last?.url?.query, "purifier=exhaust_fan")
+
+    let body = try XCTUnwrap(MockURLProtocol.recordedBodies().dropFirst().first ?? nil)
+    let json = try JSONDecoder().decode(JSONValue.self, from: body)
+    XCTAssertEqual(json, .object([
+      "fan": .string("exhaust"), "speed": .number(5), "skip_delay": .number(1),
+    ]))
+  }
+
+  func testFanSpeedRechecksModeBeforeSendingCommand() async throws {
+    let client = makeMockClient()
+    MockURLProtocol.setPurifierMode(.internalCirculation)
+
+    do {
+      _ = try await client.setFanSpeed(25, for: .exhaust)
+      XCTFail("Expected the current mode to block the exhaust fan command.")
+    } catch MonitorError.server(let message) {
+      XCTAssertTrue(message.contains("current mode"))
+    }
+
+    XCTAssertEqual(MockURLProtocol.recordedRequests().map(\.httpMethod), ["GET"])
+  }
+
+  private func makeMockClient() -> MoonrakerClient {
+    let configuration = URLSessionConfiguration.ephemeral
+    configuration.protocolClasses = [MockURLProtocol.self]
+    return MoonrakerClient(
+      printer: SavedPrinter(name: "U1", host: "192.168.1.42", serialNumber: "U1-123"),
+      session: URLSession(configuration: configuration)
+    )
   }
 }
 
@@ -147,6 +199,7 @@ private final class MockURLProtocol: URLProtocol {
   private static let lock = NSLock()
   private static var requests: [URLRequest] = []
   private static var bodies: [Data?] = []
+  private static var purifierMode = VentilationMode.externalCirculation
 
   override class func canInit(with request: URLRequest) -> Bool {
     true
@@ -162,6 +215,7 @@ private final class MockURLProtocol: URLProtocol {
     Self.lock.lock()
     Self.requests.append(request)
     Self.bodies.append(body)
+    let purifierMode = Self.purifierMode
     Self.lock.unlock()
 
     let json: String
@@ -173,6 +227,8 @@ private final class MockURLProtocol: URLProtocol {
 
     if request.url?.path == "/printer/gcode/script" {
       json = #"{"result":"ok"}"#
+    } else if request.url?.path == "/printer/control/purifier" {
+      json = #"{"result":{"state":"success"}}"#
     } else if request.url?.path == "/machine/system_info" {
       json = #"{"result":{"system_info":{"product_info":{"firmware_version":"1.6.0"}}}}"#
     } else if queryItems?.contains(where: { $0.name == "print_stats" }) == true {
@@ -190,6 +246,13 @@ private final class MockURLProtocol: URLProtocol {
             }
           }
         }
+        """
+    } else if queryItems?.contains(where: { $0.name == "purifier" }) == true {
+      json = """
+        {"result":{"status":{"purifier":{
+          "power_detected":true,"mode":\(purifierMode.rawValue),
+          "exhaust_fan":{"speed":0.05},"inner_fan":{"speed":0.4}
+        }}}}
         """
     } else if queryItems?.contains(where: { $0.name == "gcode_move" }) == true {
       json = #"{"result":{"status":{"gcode_move":{"speed_factor":1.2}}}}"#
@@ -219,6 +282,13 @@ private final class MockURLProtocol: URLProtocol {
     lock.lock()
     requests = []
     bodies = []
+    purifierMode = .externalCirculation
+    lock.unlock()
+  }
+
+  static func setPurifierMode(_ mode: VentilationMode) {
+    lock.lock()
+    purifierMode = mode
     lock.unlock()
   }
 

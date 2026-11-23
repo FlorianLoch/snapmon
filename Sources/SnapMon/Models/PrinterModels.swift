@@ -22,6 +22,15 @@ enum ConnectionState: Equatable, Sendable {
   var isConnected: Bool {
     self == .connected
   }
+
+  var isUnreachable: Bool {
+    switch self {
+    case .disconnected, .stale:
+      return true
+    case .connecting, .connected:
+      return false
+    }
+  }
 }
 
 enum PrintState: String, Codable, CaseIterable, Sendable {
@@ -129,6 +138,99 @@ struct TemperatureReading: Equatable, Sendable {
   var target: Double?
 }
 
+enum VentilationMode: Int, Sendable {
+  case standby = 0
+  case externalCirculation = 1
+  case internalPreheat = 2
+  case internalCirculation = 3
+
+  var isInternal: Bool {
+    self == .internalPreheat || self == .internalCirculation
+  }
+
+  var displayName: String {
+    switch self {
+    case .standby: return "Standby"
+    case .externalCirculation: return "External circulation"
+    case .internalPreheat: return "Internal (preheating)"
+    case .internalCirculation: return "Internal circulation"
+    }
+  }
+}
+
+enum VentilationFan: String, CaseIterable, Sendable {
+  case exhaust
+  case recirculation = "inner"
+
+  static let speedStep = 5
+
+  var title: String {
+    switch self {
+    case .exhaust: return "Exhaust fan"
+    case .recirculation: return "Recirculation fan"
+    }
+  }
+
+  var statusKey: String { "\(rawValue)_fan" }
+}
+
+struct VentilationReading: Equatable, Sendable {
+  var powerDetected: Bool?
+  var mode: VentilationMode?
+  var exhaustSpeed: Double?
+  var recirculationSpeed: Double?
+  var recirculationRPM: Double?
+
+  func speed(for fan: VentilationFan) -> Double? {
+    switch fan {
+    case .exhaust: return exhaustSpeed
+    case .recirculation: return recirculationSpeed
+    }
+  }
+
+  func adjustableRange(for fan: VentilationFan) -> ClosedRange<Int>? {
+    guard powerDetected != false, let speed = speed(for: fan), (0...1).contains(speed), let mode else {
+      return nil
+    }
+
+    if mode.isInternal {
+      return fan == .exhaust ? nil : 10...100
+    }
+    return (mode == .externalCirculation && fan == .exhaust ? 5 : 0)...100
+  }
+
+  func allowsSpeed(_ percentage: Int, for fan: VentilationFan) -> Bool {
+    adjustableRange(for: fan)?.contains(percentage) == true
+      && percentage.isMultiple(of: VentilationFan.speedStep)
+  }
+
+  mutating func setSpeed(_ speed: Double?, for fan: VentilationFan) {
+    switch fan {
+    case .exhaust: exhaustSpeed = speed
+    case .recirculation: recirculationSpeed = speed
+    }
+  }
+
+  mutating func apply(_ status: [String: JSONValue]) {
+    if let power = status["power_detected"] {
+      powerDetected = power.boolValue
+    }
+    if let rawMode = status["mode"] {
+      mode = rawMode.doubleValue
+        .flatMap { Int(exactly: $0) }
+        .flatMap(VentilationMode.init(rawValue:))
+    }
+    for fan in VentilationFan.allCases {
+      if let fanStatus = status[fan.statusKey] {
+        setSpeed(fanStatus["speed"]?.doubleValue, for: fan)
+      }
+    }
+    if let rpm = status["inner_fan_rpm"] {
+      recirculationRPM = rpm.doubleValue
+    }
+  }
+}
+
 enum PrinterSpeedModifier {
   static let values = [50, 80, 100, 120, 150]
   static let defaultValue = 100
@@ -148,6 +250,8 @@ enum PrinterSpeedModifier {
 }
 
 struct PrinterSnapshot: Equatable, Sendable {
+  static let extruderNames = ["extruder", "extruder1", "extruder2", "extruder3"]
+
   var state: PrintState = .unknown
   var filename = ""
   var message = ""
@@ -157,8 +261,10 @@ struct PrinterSnapshot: Equatable, Sendable {
   var currentLayer: Int?
   var totalLayers: Int?
   var bed = TemperatureReading()
-  var nozzle = TemperatureReading()
-  var activeExtruder = "extruder"
+  var chamber = TemperatureReading()
+  var nozzles: [String: TemperatureReading] = [:]
+  var activeExtruder: String?
+  var ventilation = VentilationReading()
   var speedModifier = PrinterSpeedModifier.defaultValue
   var ledOn = false
   var updatedAt: Date?

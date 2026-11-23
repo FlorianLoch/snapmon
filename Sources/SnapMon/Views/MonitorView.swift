@@ -7,10 +7,23 @@ struct MonitorView: View {
   var body: some View {
     HSplitView {
       CameraView()
-        .frame(minWidth: 560)
+        .frame(minWidth: 560, maxHeight: .infinity)
+        .clipped()
 
       InspectorView()
-        .frame(minWidth: 280, idealWidth: 320, maxWidth: 380)
+        .frame(minWidth: 280, idealWidth: 320, maxWidth: 380, maxHeight: .infinity)
+        .clipped()
+    }
+    .frame(maxWidth: .infinity, maxHeight: .infinity)
+    .background {
+      Group {
+        if model.isInspectorTranslucent {
+          BehindWindowVisualEffectView()
+        } else {
+          Color(nsColor: .windowBackgroundColor)
+        }
+      }
+      .ignoresSafeArea()
     }
     .toolbar {
       ToolbarItem {
@@ -30,8 +43,11 @@ struct MonitorView: View {
 
 private struct CameraView: View {
   @Environment(AppModel.self) private var model
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
   var body: some View {
+    let isPrinterUnreachable = model.connectionState.isUnreachable
+
     ZStack {
       Color.black
 
@@ -40,7 +56,7 @@ private struct CameraView: View {
           .resizable()
           .aspectRatio(contentMode: .fit)
           .frame(maxWidth: .infinity, maxHeight: .infinity)
-      } else {
+      } else if !isPrinterUnreachable {
         ContentUnavailableView {
           Label("Camera", systemImage: "video.slash")
         } description: {
@@ -49,21 +65,37 @@ private struct CameraView: View {
         .foregroundStyle(.white, .secondary)
       }
     }
-    .overlay(alignment: .topLeading) {
-      HStack(spacing: 7) {
-        Circle()
-          .fill(model.cameraStatus == "Live" ? .green : .orange)
-          .frame(width: 8, height: 8)
-        Text(model.cameraStatus)
-        Text("·")
-        Text("\(Int(model.maxFrameRate)) FPS max")
+    .overlay {
+      ZStack {
+        Color.black.opacity(0.7)
+        ContentUnavailableView("Printer unreachable", systemImage: "wifi.exclamationmark")
+          .foregroundStyle(.white, .secondary)
       }
-      .font(AppTypography.caption)
-      .foregroundStyle(.white)
-      .padding(.horizontal, 10)
-      .padding(.vertical, 7)
-      .background(.black.opacity(0.55), in: Capsule())
-      .padding(14)
+      .opacity(isPrinterUnreachable ? 1 : 0)
+      .animation(
+        reduceMotion ? nil : .easeOut(duration: 0.25),
+        value: isPrinterUnreachable
+      )
+      .accessibilityHidden(!isPrinterUnreachable)
+      .allowsHitTesting(false)
+    }
+    .overlay(alignment: .topLeading) {
+      if !isPrinterUnreachable {
+        HStack(spacing: 7) {
+          Circle()
+            .fill(model.cameraStatus == "Live" ? .green : .orange)
+            .frame(width: 8, height: 8)
+          Text(model.cameraStatus)
+          Text("·")
+          Text("\(Int(model.maxFrameRate)) FPS max")
+        }
+        .font(AppTypography.caption)
+        .foregroundStyle(.white)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 7)
+        .background(.black.opacity(0.55), in: Capsule())
+        .padding(14)
+      }
     }
     .overlay(alignment: .bottomTrailing) {
       if let frameDate = model.cameraFrameDate {
@@ -78,34 +110,38 @@ private struct CameraView: View {
 
 private struct InspectorView: View {
   @Environment(AppModel.self) private var model
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
   @State private var selectedSpeedIndex = Double(
     PrinterSpeedModifier.closestIndex(to: PrinterSpeedModifier.defaultValue)
   )
   @State private var isAdjustingSpeed = false
+  @State private var editingFan: VentilationFan?
+  @State private var selectedFanPercentage = 0.0
 
   var body: some View {
     VStack(alignment: .leading, spacing: 0) {
       ScrollView {
         VStack(alignment: .leading, spacing: 22) {
           printerHeader
-          jobSection
-          temperatureSection
+          dimmedContent {
+            VStack(alignment: .leading, spacing: 22) {
+              jobSection
+              temperatureSection
+              ventilationSection
+            }
+          }
         }
         .padding(22)
       }
 
-      Divider()
-      controls
-        .padding(18)
-    }
-    .background {
-      if model.isInspectorTranslucent {
-        BehindWindowVisualEffectView()
-      } else {
-        Color(nsColor: .windowBackgroundColor)
+      dimmedContent {
+        VStack(spacing: 0) {
+          Divider()
+          controls
+            .padding(18)
+        }
       }
     }
-    .opacity(model.isCommandPending ? 0.38 : 1)
     .disabled(model.isCommandPending)
     .overlay {
       if model.isCommandPending {
@@ -115,18 +151,32 @@ private struct InspectorView: View {
       }
     }
     .animation(.easeInOut(duration: 0.16), value: model.isCommandPending)
-    .animation(.easeInOut(duration: 0.2), value: model.isInspectorTranslucent)
+  }
+
+  private func dimmedContent<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
+    let shouldDim = !model.connectionState.isConnected
+
+    return content()
+      .saturation(shouldDim ? 0 : 1)
+      .opacity(shouldDim && !model.isCommandPending ? 0.6 : 1)
+      .animation(
+        reduceMotion ? nil : .easeOut(duration: 0.25),
+        value: shouldDim
+      )
+      .opacity(model.isCommandPending ? 0.38 : 1)
   }
 
   private var printerHeader: some View {
     VStack(alignment: .leading, spacing: 8) {
       HStack {
-        VStack(alignment: .leading, spacing: 2) {
-          Text(model.selectedPrinter?.name ?? "Snapmaker U1")
-            .font(AppTypography.title2.weight(.semibold))
-          Text(model.selectedPrinter?.host ?? "")
-            .font(AppTypography.caption.monospaced())
-            .foregroundStyle(.secondary)
+        dimmedContent {
+          VStack(alignment: .leading, spacing: 2) {
+            Text(model.selectedPrinter?.name ?? "Snapmaker U1")
+              .font(AppTypography.title2.weight(.semibold))
+            Text(model.selectedPrinter?.host ?? "")
+              .font(AppTypography.caption.monospaced())
+              .foregroundStyle(.secondary)
+          }
         }
 
         Spacer()
@@ -134,9 +184,11 @@ private struct InspectorView: View {
       }
 
       if let version = model.firmwareVersion {
-        Text("Firmware \(version)")
-          .font(AppTypography.caption)
-          .foregroundStyle(.secondary)
+        dimmedContent {
+          Text("Firmware \(version)")
+            .font(AppTypography.caption)
+            .foregroundStyle(.secondary)
+        }
       }
     }
   }
@@ -200,15 +252,171 @@ private struct InspectorView: View {
       Text("Temperatures")
         .font(AppTypography.headline)
 
-      MetadataRow(
-        title: "Nozzle",
-        value: temperatureDescription(model.snapshot.nozzle)
-      )
+      LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
+        ForEach(PrinterSnapshot.extruderNames.indices, id: \.self) { index in
+          let name = PrinterSnapshot.extruderNames[index]
+          let isActive = model.snapshot.activeExtruder == name
+          let reading = model.snapshot.nozzles[name, default: TemperatureReading()]
+
+          VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 4) {
+              Text("Nozzle \(index + 1)")
+                .foregroundStyle(.secondary)
+              if isActive {
+                Text("Active")
+                  .foregroundStyle(Color.accentColor)
+              }
+            }
+            .font(AppTypography.caption)
+
+            Text(temperatureDescription(reading))
+              .font(AppTypography.callout.monospacedDigit())
+          }
+          .frame(maxWidth: .infinity, alignment: .leading)
+          .padding(8)
+          .background(
+            isActive ? Color.accentColor.opacity(0.12) : Color.secondary.opacity(0.08),
+            in: RoundedRectangle(cornerRadius: 8)
+          )
+          .accessibilityElement(children: .combine)
+        }
+      }
+
       MetadataRow(
         title: "Bed",
         value: temperatureDescription(model.snapshot.bed)
       )
+      MetadataRow(
+        title: "Chamber",
+        value: temperatureDescription(model.snapshot.chamber)
+      )
     }
+  }
+
+  private var ventilationSection: some View {
+    let ventilation = model.snapshot.ventilation
+
+    return VStack(alignment: .leading, spacing: 12) {
+      Text("Ventilation")
+        .font(AppTypography.headline)
+
+      if ventilation.powerDetected == false {
+        MetadataRow(title: "Mode", value: "Top Cover disconnected")
+      } else {
+        MetadataRow(title: "Mode", value: ventilation.mode?.displayName ?? "—")
+        ForEach(VentilationFan.allCases, id: \.self) { fan in
+          fanRow(fan, ventilation: ventilation)
+        }
+      }
+    }
+    .onChange(of: ventilation.mode) { editingFan = nil }
+    .onChange(of: ventilation.powerDetected) { editingFan = nil }
+    .onChange(of: model.connectionState.isConnected) { editingFan = nil }
+    .onChange(of: model.selectedPrinter) { editingFan = nil }
+  }
+
+  private func fanRow(_ fan: VentilationFan, ventilation: VentilationReading) -> some View {
+    HStack(spacing: 6) {
+      Text(fan.title)
+        .foregroundStyle(.secondary)
+      Spacer(minLength: 0)
+
+      if fan == .recirculation, let rpm = ventilation.recirculationRPM {
+        Text("\(rpm.formatted(.number.precision(.fractionLength(0)))) rpm")
+          .font(AppTypography.caption.monospacedDigit())
+          .foregroundStyle(.secondary)
+      }
+
+      fanSpeedControl(fan, ventilation: ventilation)
+    }
+    .font(AppTypography.callout.monospacedDigit())
+  }
+
+  @ViewBuilder
+  private func fanSpeedControl(_ fan: VentilationFan, ventilation: VentilationReading) -> some View {
+    let speed = ventilation.speed(for: fan)
+    let value = speed?.formatted(.percent.precision(.fractionLength(0))) ?? "—"
+
+    if model.connectionState.isConnected,
+      let range = ventilation.adjustableRange(for: fan),
+      let speed
+    {
+      Button {
+        let step = Double(VentilationFan.speedStep)
+        let nearest = (speed * 100 / step).rounded() * step
+        selectedFanPercentage = min(max(nearest, Double(range.lowerBound)), Double(range.upperBound))
+        editingFan = fan
+      } label: {
+        Text(value)
+      }
+      .buttonStyle(.bordered)
+      .controlSize(.small)
+      .fixedSize()
+      .accessibilityLabel("\(fan.title) speed")
+      .accessibilityValue(value)
+      .modifier(FanSpeedPointer(enabled: !model.isCommandPending))
+      .popover(
+        isPresented: Binding(
+          get: { editingFan == fan },
+          set: { if !$0 && editingFan == fan { editingFan = nil } }
+        ),
+        arrowEdge: .trailing
+      ) {
+        fanSpeedPopover(fan, range: range, currentPercentage: (speed * 100).rounded())
+      }
+    } else if fan == .exhaust, ventilation.mode?.isInternal == true {
+      Text(value)
+        .foregroundStyle(.secondary)
+        .help("The exhaust fan stays at 0% during internal circulation to retain chamber heat.")
+    } else {
+      Text(value)
+        .foregroundStyle(.secondary)
+    }
+  }
+
+  private func fanSpeedPopover(
+    _ fan: VentilationFan,
+    range: ClosedRange<Int>,
+    currentPercentage: Double
+  ) -> some View {
+    VStack(alignment: .leading, spacing: 12) {
+      HStack {
+        Text(fan.title)
+          .font(AppTypography.headline)
+        Spacer()
+        Text("\(Int(selectedFanPercentage))%")
+          .monospacedDigit()
+          .accessibilityHidden(true)
+      }
+
+      Slider(
+        value: $selectedFanPercentage,
+        in: Double(range.lowerBound)...Double(range.upperBound),
+        step: Double(VentilationFan.speedStep)
+      ) {
+        Text("\(fan.title) speed")
+      } minimumValueLabel: {
+        Text("\(range.lowerBound)%")
+      } maximumValueLabel: {
+        Text("\(range.upperBound)%")
+      }
+      .labelsHidden()
+      .accessibilityValue("\(Int(selectedFanPercentage)) percent")
+
+      HStack {
+        Spacer()
+        Button("Cancel", role: .cancel) { editingFan = nil }
+          .keyboardShortcut(.cancelAction)
+        Button("Apply") {
+          editingFan = nil
+          model.setFanSpeed(Int(selectedFanPercentage), for: fan)
+        }
+        .keyboardShortcut(.defaultAction)
+        .disabled(selectedFanPercentage == currentPercentage)
+      }
+    }
+    .padding(16)
+    .frame(width: 260)
   }
 
   private var controls: some View {
@@ -326,11 +534,13 @@ private struct InspectorView: View {
       return "—"
     }
 
+    let currentValue = current.formatted(.number.precision(.fractionLength(0)))
     if let target = reading.target, target > 0 {
-      return "\(Int(current.rounded()))° / \(Int(target.rounded()))°C"
+      let targetValue = target.formatted(.number.precision(.fractionLength(0)))
+      return "\(currentValue)° / \(targetValue)°C"
     }
 
-    return "\(Int(current.rounded()))°C"
+    return "\(currentValue)°C"
   }
 
   private func formatDuration(_ duration: TimeInterval?) -> String {
@@ -352,6 +562,35 @@ private struct InspectorView: View {
     }
 
     return "\(remainingSeconds)s"
+  }
+}
+
+private struct FanSpeedPointer: ViewModifier {
+  let enabled: Bool
+
+  func body(content: Content) -> some View {
+    if #available(macOS 15, *) {
+      content.pointerStyle(enabled ? .link : nil)
+    } else {
+      content.background {
+        if enabled { PointingHandCursor() }
+      }
+    }
+  }
+}
+
+private struct PointingHandCursor: NSViewRepresentable {
+  func makeNSView(context: Context) -> CursorView { CursorView() }
+
+  func updateNSView(_ nsView: CursorView, context: Context) {}
+
+  final class CursorView: NSView {
+    override func resetCursorRects() {
+      super.resetCursorRects()
+      addCursorRect(visibleRect, cursor: .pointingHand)
+    }
+
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
   }
 }
 

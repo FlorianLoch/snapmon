@@ -2,6 +2,22 @@ import Darwin
 import Foundation
 
 final class MoonrakerClient: @unchecked Sendable {
+  private static let statusFields: [String: [String]] = [
+    "print_stats": ["state", "filename", "print_duration", "total_duration", "message", "info"],
+    "display_status": ["progress", "message"],
+    "virtual_sdcard": ["progress", "file_position", "file_size"],
+    "heater_bed": ["temperature", "target"],
+    "toolhead": ["extruder"],
+    "extruder": ["temperature", "target"],
+    "extruder1": ["temperature", "target"],
+    "extruder2": ["temperature", "target"],
+    "extruder3": ["temperature", "target"],
+    "temperature_sensor cavity": ["temperature"],
+    "purifier": ["power_detected", "mode", "exhaust_fan", "inner_fan", "inner_fan_rpm"],
+    "gcode_move": ["speed_factor"],
+    "led cavity_led": ["color_data"],
+  ]
+
   private let printer: SavedPrinter
   private let session: URLSession
 
@@ -100,32 +116,7 @@ final class MoonrakerClient: @unchecked Sendable {
               [
                 "jsonrpc": "2.0",
                 "method": "printer.objects.subscribe",
-                "params": [
-                  "objects": [
-                    "print_stats": [
-                      "state",
-                      "filename",
-                      "print_duration",
-                      "total_duration",
-                      "message",
-                      "info",
-                    ],
-                    "display_status": ["progress", "message"],
-                    "virtual_sdcard": [
-                      "progress",
-                      "file_position",
-                      "file_size",
-                    ],
-                    "heater_bed": ["temperature", "target"],
-                    "toolhead": ["extruder"],
-                    "extruder": ["temperature", "target"],
-                    "extruder1": ["temperature", "target"],
-                    "extruder2": ["temperature", "target"],
-                    "extruder3": ["temperature", "target"],
-                    "gcode_move": ["speed_factor"],
-                    "led cavity_led": ["color_data"],
-                  ]
-                ],
+                "params": ["objects": Self.statusFields],
                 "id": 2,
               ],
               to: task
@@ -192,25 +183,9 @@ final class MoonrakerClient: @unchecked Sendable {
   func currentStatus() async throws -> [String: JSONValue] {
     let response = try await get(
       path: "/printer/objects/query",
-      queryItems: [
-        URLQueryItem(
-          name: "print_stats",
-          value: "state,filename,print_duration,total_duration,message,info"
-        ),
-        URLQueryItem(name: "display_status", value: "progress,message"),
-        URLQueryItem(
-          name: "virtual_sdcard",
-          value: "progress,file_position,file_size"
-        ),
-        URLQueryItem(name: "heater_bed", value: "temperature,target"),
-        URLQueryItem(name: "toolhead", value: "extruder"),
-        URLQueryItem(name: "extruder", value: "temperature,target"),
-        URLQueryItem(name: "extruder1", value: "temperature,target"),
-        URLQueryItem(name: "extruder2", value: "temperature,target"),
-        URLQueryItem(name: "extruder3", value: "temperature,target"),
-        URLQueryItem(name: "gcode_move", value: "speed_factor"),
-        URLQueryItem(name: "led cavity_led", value: "color_data"),
-      ]
+      queryItems: Self.statusFields.sorted { $0.key < $1.key }.map { name, fields in
+        URLQueryItem(name: name, value: fields.joined(separator: ","))
+      }
     )
     guard let status = response.value(at: "result", "status")?.objectValue else {
       throw MonitorError.invalidResponse
@@ -274,6 +249,48 @@ final class MoonrakerClient: @unchecked Sendable {
     }
 
     throw MonitorError.server("The printer did not confirm the requested LED state.")
+  }
+
+  func setFanSpeed(_ percentage: Int, for fan: VentilationFan) async throws -> Double {
+    let ventilation = try await ventilationStatus(fields: ["power_detected", "mode", fan.statusKey])
+    guard ventilation.allowsSpeed(percentage, for: fan) else {
+      throw MonitorError.server("\(fan.title) cannot be set to \(percentage)% in the current mode.")
+    }
+    try Task.checkCancellation()
+
+    let response = try await request(
+      path: "/printer/control/purifier",
+      method: "POST",
+      body: ["fan": fan.rawValue, "speed": percentage, "skip_delay": 1]
+    )
+    guard let result = response["result"]?.objectValue else {
+      throw MonitorError.invalidResponse
+    }
+    guard result["state"]?.stringValue == "success" else {
+      throw MonitorError.server(
+        result["message"]?.stringValue ?? "The printer rejected the fan speed change."
+      )
+    }
+
+    let confirmed = try await ventilationStatus(fields: [fan.statusKey])
+    guard let speed = confirmed.speed(for: fan), abs(speed * 100 - Double(percentage)) < 0.5 else {
+      throw MonitorError.server("The printer did not confirm the requested fan speed.")
+    }
+    return speed
+  }
+
+  private func ventilationStatus(fields: [String]) async throws -> VentilationReading {
+    let response = try await get(
+      path: "/printer/objects/query",
+      queryItems: [URLQueryItem(name: "purifier", value: fields.joined(separator: ","))]
+    )
+    guard let status = response.value(at: "result", "status", "purifier")?.objectValue else {
+      throw MonitorError.invalidResponse
+    }
+
+    var reading = VentilationReading()
+    reading.apply(status)
+    return reading
   }
 
   private func ledState() async throws -> Bool {
